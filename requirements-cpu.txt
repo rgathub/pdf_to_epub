@@ -1,0 +1,8 @@
+# CPU-friendly PDF and EPUB conversion dependencies.
+pymupdf
+ebooklib
+Pillow
+defusedxml
+
+# OCR support using the CPU.
+easyocr

@@ -39,22 +39,50 @@ import posixpath
 import re
 import sys
 import threading
+import tempfile
 import traceback
 import zipfile
 import importlib.util
+import logging
 import platform
 import time
 from urllib.parse import unquote, urlsplit
-try:
-    import defusedxml.ElementTree as ElementTree
-except ImportError:
-    from xml.etree import ElementTree
+import defusedxml.ElementTree as ElementTree
 
 from io import BytesIO
 from pathlib import Path
 
 
 _parallel_worker_state = threading.local()
+logger = logging.getLogger(__name__)
+
+
+def _same_path(first: str | Path, second: str | Path) -> bool:
+    """Compare paths using Windows-aware absolute, case-insensitive semantics."""
+    return os.path.normcase(os.path.abspath(os.fspath(first))) == os.path.normcase(
+        os.path.abspath(os.fspath(second))
+    )
+
+
+def _temporary_output_path(output_path: str | Path) -> Path:
+    """Create a temporary output path beside the requested destination."""
+    destination = Path(output_path)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
+    os.close(descriptor)
+    return Path(temporary)
+
+
+def _discard_temporary_output(path: Path | None) -> None:
+    """Remove a temporary EPUB path when conversion does not complete."""
+    if path is not None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 try:
     import fitz  # PyMuPDF
@@ -70,6 +98,11 @@ try:
     from PIL import Image
 except ImportError:
     Image = None
+
+_DECOMPRESSION_ERRORS = ()
+if Image is not None:
+    _DECOMPRESSION_ERRORS = (Image.DecompressionBombError,)
+_IMAGE_ERRORS = (OSError, RuntimeError, ValueError) + _DECOMPRESSION_ERRORS
 
 
 class PDFToEPUBConverter:
@@ -99,6 +132,7 @@ class PDFToEPUBConverter:
         ocr_retry_dpi: int | None = None,
         ocr_retry_confidence: float = 0.35,
         workers: int = 1,
+        progress_callback=None,
     ):
         """
         Initialize the converter.
@@ -126,6 +160,7 @@ class PDFToEPUBConverter:
             ocr_retry_dpi: DPI used for OCR retries (default: ocr_dpi * 1.5)
             ocr_retry_confidence: Retry when average OCR confidence is below this
             workers: Number of page workers for single-PDF conversion; 1 is serial
+            progress_callback: Optional callback receiving progress event dictionaries
         """
         if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
             raise ValueError("workers must be a positive integer")
@@ -149,10 +184,12 @@ class PDFToEPUBConverter:
         self.chapter_overrides = chapter_overrides or {}
         self.image_placement = image_placement
         self.language = language or "en"
+        self._default_language = self.language
         self.ocr_retry = ocr_retry
         self.ocr_retry_dpi = ocr_retry_dpi or max(300, int(ocr_dpi * 1.5))
         self.ocr_retry_confidence = ocr_retry_confidence
         self.workers = workers
+        self.progress_callback = progress_callback
         self._ocr_reader = None
         self._ocr_gpu = False
         self._current_pdf_path = None
@@ -205,12 +242,32 @@ class PDFToEPUBConverter:
             "repeated_header_action": self.repeated_header_action,
             "chapter_overrides": dict(self.chapter_overrides),
             "image_placement": self.image_placement,
-            "language": self.language,
+            "language": self._default_language,
             "ocr_retry": self.ocr_retry,
             "ocr_retry_dpi": self.ocr_retry_dpi,
             "ocr_retry_confidence": self.ocr_retry_confidence,
             "workers": 1,
+            "progress_callback": None,
         }
+
+    def _report_progress(self, page_num: int, total_pages: int) -> None:
+        """Emit a structured page-progress event and retain CLI progress output."""
+        percent = page_num / total_pages * 100 if total_pages else 100.0
+        event = {
+            "event": "page",
+            "page": page_num,
+            "pages": total_pages,
+            "percent": round(percent, 1),
+        }
+        if self.progress_callback is not None:
+            self.progress_callback(event)
+        logger.info("Processing page %s/%s (%.1f%%)", page_num, total_pages, percent)
+        if page_num == 1 or page_num % 10 == 0 or page_num == total_pages:
+            print(
+                f"Processing page {page_num}/{total_pages} "
+                f"({percent:.1f}%)",
+                flush=True,
+            )
 
     def _initialize_parallel_worker(self, pdf_path: str) -> None:
         """Create isolated converter state for one worker thread."""
@@ -344,7 +401,10 @@ class PDFToEPUBConverter:
         Returns:
             True if conversion was successful, False otherwise
         """
+        temporary_output: Path | None = None
         try:
+            if _same_path(pdf_path, output_path):
+                raise ValueError("Input and output paths must be different.")
             started = time.perf_counter()
             self._current_pdf_path = str(Path(pdf_path).resolve())
             self._stats = self._new_stats()
@@ -377,30 +437,14 @@ class PDFToEPUBConverter:
                     )
                     for result in page_results:
                         page_num = result["page_num"]
-                        if (
-                            page_num == 1
-                            or page_num % 10 == 0
-                            or page_num == total_pages
-                        ):
-                            percent = page_num / total_pages * 100
-                            print(
-                                f"Processing page {page_num}/{total_pages} "
-                                f"({percent:.1f}%)",
-                                flush=True,
-                            )
+                        self._report_progress(page_num, total_pages)
                         self._merge_page_result(
                             epub_book, chapters, result, style
                         )
                 else:
                     for i, page in enumerate(doc):
                         page_num = i + 1
-                        if page_num == 1 or page_num % 10 == 0 or page_num == total_pages:
-                            percent = page_num / total_pages * 100
-                            print(
-                                f"Processing page {page_num}/{total_pages} "
-                                f"({percent:.1f}%)",
-                                flush=True,
-                            )
+                        self._report_progress(page_num, total_pages)
                         chapter = self.process_page(epub_book, page, page_num)
                         if chapter:
                             chapter.add_item(style)
@@ -417,20 +461,30 @@ class PDFToEPUBConverter:
             self._stats["chapters"] = len(self._identify_chapters(chapters))
 
             # Save the EPUB file
+            temporary_output = _temporary_output_path(output_path)
             epub.write_epub(
-                output_path,
+                str(temporary_output),
                 epub_book,
                 {"image_quality": self.image_quality, "epub3_landmark": True},
             )
             if self.validate_output:
-                validation = self.validate_epub_diagnostics(output_path)
+                validation = self.validate_epub_diagnostics(temporary_output)
                 self._stats["validation"] = validation
                 if not validation["valid"]:
                     print(
-                        f"Warning: EPUB validation failed: {output_path} "
+                        f"Error: EPUB validation failed: {output_path} "
                         f"({len(validation['errors'])} error(s), "
                         f"{len(validation['warnings'])} warning(s))"
                     )
+                    self._stats["elapsed_seconds"] = round(
+                        time.perf_counter() - started, 3
+                    )
+                    _discard_temporary_output(temporary_output)
+                    temporary_output = None
+                    self._write_report(pdf_path, output_path)
+                    return False
+            os.replace(temporary_output, output_path)
+            temporary_output = None
             self._stats["elapsed_seconds"] = round(time.perf_counter() - started, 3)
             self._write_report(pdf_path, output_path)
 
@@ -438,6 +492,8 @@ class PDFToEPUBConverter:
             return True
 
         except (OSError, RuntimeError, ValueError, TypeError) as e:
+            _discard_temporary_output(temporary_output)
+            logger.error("Conversion failed for %s: %s", pdf_path, e)
             print(f"Error converting {pdf_path}: {e}")
             traceback.print_exc()
             return False
@@ -457,7 +513,7 @@ class PDFToEPUBConverter:
             "ocr_device": "disabled" if not ocr_enabled else "unavailable",
             "cuda_available": False,
         }
-        for module in ("easyocr", "torch", "numpy"):
+        for module in ("easyocr", "torch", "torchvision", "numpy"):
             result["optional"][module] = importlib.util.find_spec(module) is not None
         if ocr_enabled and result["optional"]["torch"]:
             try:
@@ -478,7 +534,10 @@ class PDFToEPUBConverter:
             result["ocr_device"] = "cpu (torch unavailable)"
         result["ready"] = all(result["required"].values()) and (
             not ocr_enabled
-            or (result["optional"]["easyocr"] and result["optional"]["numpy"])
+            or all(
+                result["optional"][module]
+                for module in ("easyocr", "torch", "torchvision", "numpy")
+            )
         )
         return result
 
@@ -486,7 +545,7 @@ class PDFToEPUBConverter:
         """Normalize PDF metadata for EPUB Dublin Core fields."""
         raw = doc.metadata or {}
         title = (raw.get("title") or "").strip() or self._extract_title(pdf_path)
-        language = (raw.get("language") or "").strip() or self.language
+        language = (raw.get("language") or "").strip() or self._default_language
         return {
             "title": title,
             "author": (raw.get("author") or "").strip(),
@@ -523,7 +582,7 @@ class PDFToEPUBConverter:
             try:
                 pixmap = page.get_pixmap(dpi=150, alpha=False)
                 image_bytes = pixmap.tobytes("jpeg")
-            except (OSError, RuntimeError, ValueError):
+            except _IMAGE_ERRORS:
                 return
         try:
             cover = Image.open(BytesIO(image_bytes))
@@ -852,7 +911,7 @@ class PDFToEPUBConverter:
                 )
                 images_to_embed.append((img_index, html_img, top, insertion_index))
 
-            except (KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
+            except (KeyError, TypeError) + _IMAGE_ERRORS as e:
                 print(f"Warning: Could not extract image {img_index}: {e}")
 
         if self.image_placement == "position":
@@ -1148,14 +1207,19 @@ class PDFToEPUBConverter:
     ) -> tuple[list, tuple[int, int]]:
         """Run one OCR pass, optionally forcing a higher-DPI page render."""
         image = None
-        if not force_render:
-            ocr_image_xref = self._select_ocr_image(page)
-            if ocr_image_xref is not None:
-                image_data = page.parent.extract_image(ocr_image_xref)
-                image = Image.open(BytesIO(image_data["image"]))
-        if image is None:
-            pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-            image = Image.open(BytesIO(pixmap.tobytes("png")))
+        try:
+            if not force_render:
+                ocr_image_xref = self._select_ocr_image(page)
+                if ocr_image_xref is not None:
+                    image_data = page.parent.extract_image(ocr_image_xref)
+                    image = Image.open(BytesIO(image_data["image"]))
+            if image is None:
+                pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+                image = Image.open(BytesIO(pixmap.tobytes("png")))
+        except _DECOMPRESSION_ERRORS as exc:
+            raise RuntimeError(
+                "OCR image exceeds Pillow's decompression safety limit."
+            ) from exc
         image.thumbnail(self.max_image_size, Image.Resampling.LANCZOS)
         if preprocess:
             image = self._preprocess_ocr_image(image)
@@ -1849,7 +1913,11 @@ class PDFToEPUBConverter:
 
             return img_buffer.getvalue()
 
-        except (OSError, RuntimeError, ValueError) as e:
+        except _IMAGE_ERRORS as e:
+            if isinstance(e, _DECOMPRESSION_ERRORS):
+                raise RuntimeError(
+                    "Image exceeds Pillow's decompression safety limit."
+                ) from e
             print(f"Warning: Could not resize image: {e}")
             # Convert original to JPEG if resizing fails
             img_buffer = BytesIO()
@@ -1961,7 +2029,7 @@ class PDFToEPUBConverter:
                 with Image.open(BytesIO(data)) as image:
                     image.verify()
                 return True, None
-            except (OSError, RuntimeError, ValueError) as exc:
+            except _IMAGE_ERRORS as exc:
                 return False, f"image cannot be decoded: {exc}"
         signatures = (
             data.startswith(b"\xff\xd8\xff"),
@@ -3154,6 +3222,9 @@ Examples:
         if not os.path.isfile(pdf_file):
             print(f"Error: Input file not found: {pdf_file}")
             return 1
+        if _same_path(pdf_file, args.output):
+            print(f"Error: Output path must differ from input PDF: {pdf_file}")
+            return 1
 
     cache_dir = args.ocr_cache_dir
     if args.resume and not cache_dir:
@@ -3249,25 +3320,41 @@ Examples:
         converter.add_toc(epub_book, chapters)
         converter._stats["chapters"] = len(converter._identify_chapters(chapters))
 
+        temporary_output: Path | None = None
         try:
+            temporary_output = _temporary_output_path(output_path)
             epub.write_epub(
-                output_path,
+                str(temporary_output),
                 epub_book,
                 {"image_quality": args.quality, "epub3_landmark": True},
             )
         except (OSError, RuntimeError, ValueError) as e:
+            _discard_temporary_output(temporary_output)
             print(f"Error writing merged EPUB '{output_path}': {e}")
             return 1
 
+        validation_failed = False
         if args.validate:
-            validation = converter.validate_epub_diagnostics(output_path)
+            validation = converter.validate_epub_diagnostics(temporary_output)
             converter._stats["validation"] = validation
             if not validation["valid"]:
+                validation_failed = True
                 print(
-                    f"Warning: EPUB validation failed: {output_path} "
+                    f"Error: EPUB validation failed: {output_path} "
                     f"({len(validation['errors'])} error(s), "
                     f"{len(validation['warnings'])} warning(s))"
                 )
+        if validation_failed:
+            _discard_temporary_output(temporary_output)
+            temporary_output = None
+        else:
+            try:
+                os.replace(temporary_output, output_path)
+                temporary_output = None
+            except OSError as exc:
+                _discard_temporary_output(temporary_output)
+                print(f"Error writing merged EPUB '{output_path}': {exc}")
+                return 1
         converter._stats["elapsed_seconds"] = round(
             time.perf_counter() - merge_started, 3
         )
@@ -3276,8 +3363,10 @@ Examples:
                 ", ".join(args.input),
                 output_path,
             )
+        if failed or validation_failed:
+            return 1
         print(f"Successfully merged {len(args.input)} PDF(s) into: {output_path}")
-        return 1 if failed else 0
+        return 0
 
     return 0
 

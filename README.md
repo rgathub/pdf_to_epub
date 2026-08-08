@@ -10,10 +10,12 @@ Modular Python code for converting PDF documents to EPUB files.
 - `Pillow`
 - `easyocr` and its dependencies for OCR-enabled conversion
 - CUDA-enabled `torch`, `torchvision`, and `torchaudio` for GPU OCR
+- `defusedxml` for safe EPUB XML validation
 
-`requirements.txt` targets CUDA 12.8-enabled PyTorch wheels for GPU OCR.
+`requirements-gpu.txt` targets CUDA 12.8-enabled PyTorch wheels for GPU OCR.
 Use a compatible NVIDIA driver, or replace the PyTorch index URL with the
-CUDA version appropriate for the target machine.
+CUDA version appropriate for the target machine. `requirements-cpu.txt`
+installs OCR without CUDA-specific PyTorch wheels.
 
 ## Setup
 
@@ -24,14 +26,19 @@ cd D:\Code\pdf_to_epub
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-gpu.txt
 ```
 
-The package is located in the repository root, so run module commands from
-its parent directory:
+For a normal package installation, install the project itself:
 
 ```powershell
-cd D:\Code
+python -m pip install .
+```
+
+For CPU-only OCR, use:
+
+```powershell
+python -m pip install -r requirements-cpu.txt
 ```
 
 ## Usage
@@ -40,6 +47,12 @@ cd D:\Code
 python -m pdf_to_epub --help
 python -m pdf_to_epub -i input.pdf -o output.epub --no-ocr
 python -m pdf_to_epub.self_check
+```
+
+After installation, the equivalent console command is:
+
+```powershell
+pdf-to-epub -i input.pdf -o output.epub --no-ocr
 ```
 
 Run OCR on a CUDA-capable NVIDIA GPU:
@@ -67,18 +80,32 @@ options = ConversionOptions(ocr_enabled=False)
 converter = PDFToEPUBConverter(**options.as_kwargs())
 ```
 
+Library callers can receive structured page-progress events:
+
+```python
+events = []
+options = ConversionOptions(
+    ocr_enabled=False,
+    progress_callback=events.append,
+)
+```
+
+The engine also emits standard-library logging records through the
+`pdf_to_epub._engine` logger.
+
 ## Project layout
 
-- `config.py` - conversion options and chapter override parsing
-- `ocr.py` - OCR and cache service boundary
-- `pdf_pages.py` - lazy PDF page extraction
-- `epub_content.py` - EPUB writing boundary
-- `validation.py` - structural EPUB diagnostics
-- `orchestrator.py` - conversion API and lifecycle coordination
-- `cli.py` - command-line adapter
-- `_engine.py` - bundled conversion engine
-- `reference.py` - compatibility loader for the bundled engine
-- `self_check.py` - package self-check entry point
+- `src\pdf_to_epub\config.py` - conversion options and chapter override parsing
+- `src\pdf_to_epub\ocr.py` - OCR and cache service boundary
+- `src\pdf_to_epub\pdf_pages.py` - lazy PDF page extraction
+- `src\pdf_to_epub\epub_content.py` - EPUB writing boundary
+- `src\pdf_to_epub\validation.py` - structural EPUB diagnostics
+- `src\pdf_to_epub\orchestrator.py` - conversion API and lifecycle coordination
+- `src\pdf_to_epub\cli.py` - command-line adapter
+- `src\pdf_to_epub\_engine.py` - bundled conversion engine
+- `src\pdf_to_epub\reference.py` - compatibility loader for the bundled engine
+- `src\pdf_to_epub\self_check.py` - package self-check entry point
+- `pyproject.toml` - build metadata and console-script configuration
 
 ## Review findings
 
@@ -92,3 +119,31 @@ The 348-page conversion completed successfully with 348 OCR pages, zero OCR
 failures, and one low-confidence retry. The generated EPUB passed structural
 validation with zero errors and warnings, a clean ZIP integrity check, and a
 valid EPUB mimetype.
+
+Conversions write to a temporary file in the destination directory and
+replace the requested output only after writing and optional validation
+complete successfully.
+
+## Building a wheel
+
+```powershell
+python -m pip install build
+python -m build
+```
+
+The distributable wheel and source archive are written to `dist\`.
+
+The package version is defined in `src\pdf_to_epub\_version.py`. Tagging a
+commit such as `v0.1.0` triggers the PyPI release workflow; configure PyPI
+trusted publishing for the repository before creating a release tag.
+
+## Testing
+
+Run the dependency-light test suite:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+GitHub Actions runs these tests and builds the distributions on Windows for
+every push and pull request.

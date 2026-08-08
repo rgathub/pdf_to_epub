@@ -10,9 +10,7 @@ torchaudio==2.11.0+cu128
 pymupdf
 ebooklib
 Pillow
+defusedxml
 
 # OCR support.
 easyocr
-
-# Safe XML parsing for EPUB validation.
-defusedxml

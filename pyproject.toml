@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-to-epub"
+dynamic = ["version"]
+description = "Convert PDF documents to EPUB files"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "PyMuPDF",
+    "EbookLib",
+    "Pillow",
+    "defusedxml",
+]
+
+[project.optional-dependencies]
+ocr = ["easyocr"]
+
+[project.scripts]
+pdf-to-epub = "pdf_to_epub.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pdf_to_epub._version.__version__" }

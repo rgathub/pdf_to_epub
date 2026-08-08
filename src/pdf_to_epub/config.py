@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -33,6 +33,7 @@ class ConversionOptions:
     ocr_retry_dpi: int | None = None
     ocr_retry_confidence: float = 0.35
     workers: int = 1
+    progress_callback: Callable[[dict[str, Any]], None] | None = None
 
     def as_kwargs(self) -> dict[str, Any]:
         """Return constructor keyword arguments for the compatible engine."""
