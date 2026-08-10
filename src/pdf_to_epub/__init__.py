@@ -1,4 +1,4 @@
-"""Modular facade for the repository's PDF to EPUB converter."""
+"""Public package API for the modular PDF-to-EPUB converter."""
 
 from .config import ConversionOptions
 from .orchestrator import PDFToEPUBConverter

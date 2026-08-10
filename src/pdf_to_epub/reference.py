@@ -1,4 +1,4 @@
-"""Compatibility loader for the bundled conversion engine."""
+"""Compatibility loader for legacy callers of the modular implementation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from types import ModuleType
 
 
 def load_reference_module() -> ModuleType:
-    """Return the bundled engine kept behind the legacy compatibility API."""
+    """Return the backward-compatible engine shim."""
     from . import _engine
 
     return _engine

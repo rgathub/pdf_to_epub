@@ -90,8 +90,8 @@ options = ConversionOptions(
 )
 ```
 
-The engine also emits standard-library logging records through the
-`pdf_to_epub._engine` logger.
+The orchestrator also emits standard-library logging records through the
+`pdf_to_epub.orchestrator` logger.
 
 ## Project layout
 
@@ -102,19 +102,14 @@ The engine also emits standard-library logging records through the
 - `src\pdf_to_epub\validation.py` - structural EPUB diagnostics
 - `src\pdf_to_epub\orchestrator.py` - conversion API and lifecycle coordination
 - `src\pdf_to_epub\cli.py` - command-line adapter
-- `src\pdf_to_epub\_engine.py` - bundled conversion engine
-- `src\pdf_to_epub\reference.py` - compatibility loader for the bundled engine
+- `src\pdf_to_epub\_engine.py` - backward-compatible exports for the modular implementation
+- `src\pdf_to_epub\reference.py` - legacy compatibility loader for the engine shim
 - `src\pdf_to_epub\self_check.py` - package self-check entry point
 - `pyproject.toml` - build metadata and console-script configuration
 
-## Review findings
-
-The compatibility loader in `reference.py` now resolves to the bundled
-engine. Commands use `pdf_to_epub`, not `pdf_to_epub_refactored`.
-
 ## Validation
 
-The bundled engine was tested against the PDF in `test\` using CUDA OCR.
+The modular converter was tested against the PDF in `test\` using CUDA OCR.
 The 348-page conversion completed successfully with 348 OCR pages, zero OCR
 failures, and one low-confidence retry. The generated EPUB passed structural
 validation with zero errors and warnings, a clean ZIP integrity check, and a

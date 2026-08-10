@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pdf_to_epub._engine import PDFToEPUBConverter, _same_path
+from pdf_to_epub import ConversionOptions, PDFToEPUBConverter
+from pdf_to_epub.pdf_pages import _same_path
 from pdf_to_epub.validation import EPUBValidator
 
 
@@ -11,6 +12,13 @@ class PackageTests(unittest.TestCase):
         result = PDFToEPUBConverter.preflight_environment(False)
         self.assertTrue(result["ready"])
         self.assertEqual(result["ocr_device"], "disabled")
+
+    def test_options_can_be_passed_to_public_converter(self):
+        converter = PDFToEPUBConverter(
+            options=ConversionOptions(ocr_enabled=False, language="fr")
+        )
+        self.assertFalse(converter.ocr_enabled)
+        self.assertEqual(converter.language, "fr")
 
     def test_cuda_preflight_reports_installed_runtime(self):
         result = PDFToEPUBConverter.preflight_environment(True, "cuda")
