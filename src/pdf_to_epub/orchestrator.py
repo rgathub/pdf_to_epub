@@ -70,6 +70,7 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
         progress_callback=None,
         progress_bar: bool = False,
         options: ConversionOptions | None = None,
+        ocr_confidence_threshold: float = 0.4,
     ):
         """
         Initialize the converter.
@@ -98,6 +99,7 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
             ocr_retry_confidence: Retry when average OCR confidence is below this
             workers: Number of page workers for single-PDF conversion; 1 is serial
             progress_callback: Optional callback receiving progress event dictionaries
+            ocr_confidence_threshold: Minimum OCR confidence to retain text (default: 0.4)
         """
         if options is not None and isinstance(image_quality, ConversionOptions):
             raise TypeError("pass options either positionally or by keyword, not both")
@@ -147,12 +149,11 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
                 chapter_overrides=chapter_overrides or {},
                 image_placement=image_placement,
                 language=language,
-            ocr_retry=ocr_retry,
-            ocr_retry_dpi=ocr_retry_dpi,
-            ocr_retry_confidence=ocr_retry_confidence,
-            workers=workers,
-            progress_callback=progress_callback,
-        )
+            )
+        self.ocr_retry_confidence = ocr_retry_confidence
+        self.ocr_confidence_threshold = ocr_confidence_threshold
+        self.ocr_retry_confidence = ocr_retry_confidence
+        self.ocr_confidence_threshold = ocr_confidence_threshold
         self.options = options
         if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
             raise ValueError("workers must be a positive integer")
@@ -164,7 +165,8 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
         self.ocr_dpi = ocr_dpi
         self.keep_scan_images = keep_scan_images
         self.ocr_device = ocr_device.casefold()
-        self.ocr_confidence = ocr_confidence
+        self.ocr_confidence = options.ocr_confidence or 0.0
+        self.ocr_confidence_threshold = self.ocr_confidence if not options.ocr_confidence else options.ocr_confidence_threshold
         self.ocr_preprocess = ocr_preprocess
         self.ocr_cache_dir = Path(ocr_cache_dir) if ocr_cache_dir else None
         self.resume = resume
@@ -229,7 +231,7 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
             "ocr_dpi": self.ocr_dpi,
             "keep_scan_images": self.keep_scan_images,
             "ocr_device": self.ocr_device,
-            "ocr_confidence": self.ocr_confidence,
+            "ocr_confidence": self.ocr_confidence_threshold,
             "ocr_preprocess": self.ocr_preprocess,
             "ocr_cache_dir": str(self.ocr_cache_dir)
             if self.ocr_cache_dir
@@ -245,6 +247,7 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
             "ocr_retry_confidence": self.ocr_retry_confidence,
             "workers": 1,
             "progress_callback": None,
+            "ocr_confidence_threshold": self.ocr_confidence_threshold,
         }
 
 

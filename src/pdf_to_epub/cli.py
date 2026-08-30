@@ -91,6 +91,14 @@ Examples:
         help="Minimum OCR confidence from 0.0 to 1.0 (default: 0.0)",
     )
 
+    parser.add_argument(
+        "--ocr_confidence_threshold",
+        type=float,
+        default=0.4,
+        metavar="N",
+        help="OCR text retention threshold for space handling (default: 0.4)",
+    )
+
     ocr_group = parser.add_mutually_exclusive_group()
     ocr_group.add_argument(
         "--ocr",
@@ -334,6 +342,12 @@ Examples:
     if args.workers < 1:
         print("Error: workers must be a positive integer.")
         return 1
+    if 0 <= args.ocr_confidence_threshold <= 1:
+        # Validate threshold is in range
+        pass
+    else:
+        print("Error: ocr-confidence-threshold must be between 0 and 1.")
+        return 1
 
     if args.preflight:
         preflight = PDFToEPUBConverter.preflight_environment(
@@ -384,6 +398,7 @@ Examples:
         ocr_retry_confidence=args.ocr_retry_confidence,
         workers=args.workers,
         progress_bar=args.progress_bar,
+        ocr_confidence_threshold=args.ocr_confidence_threshold,
     )
 
     if len(args.input) == 1:

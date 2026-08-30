@@ -64,3 +64,8 @@ Thumbs.db
 
 # Test
 test/
+conversion_output.txt
+ocr_quality_assessment.txt
+/test_output
+VALIDATION_REPORT.md
+/output

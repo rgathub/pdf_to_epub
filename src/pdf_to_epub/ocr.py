@@ -142,7 +142,7 @@ class OCRMixin:
                 try:
                     confidence = float(confidence)
                     confidence_values.append(confidence)
-                    if confidence < self.ocr_confidence:
+                    if confidence < self.ocr_confidence_threshold:
                         continue
                 except (TypeError, ValueError):
                     continue
@@ -277,7 +277,7 @@ class OCRMixin:
             item["page"]
             for item in successful
             if item.get("min_confidence") is not None
-            and item["min_confidence"] < self.ocr_confidence
+            and item["min_confidence"] < self.ocr_confidence_threshold
         ]
         failures = [
             item for item in self._ocr_page_diagnostics if item.get("status") == "failure"

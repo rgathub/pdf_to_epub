@@ -59,6 +59,7 @@ class ConversionOptions:
     ocr_retry_confidence: float = 0.35
     workers: int = 1
     progress_callback: Callable[[dict[str, Any]], None] | None = None
+    ocr_confidence_threshold: float = 0.4  # Optimized for better space handling
 
     def as_kwargs(self) -> dict[str, Any]:
         return dict(self.__dict__)
