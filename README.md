@@ -9,10 +9,11 @@ Modular Python code for converting PDF documents to EPUB files.
 - `ebooklib`
 - `Pillow`
 - `easyocr` and its dependencies for OCR-enabled conversion
+- `numpy` (required by EasyOCR)
 - CUDA-enabled `torch`, `torchvision`, and `torchaudio` for GPU OCR
 - `defusedxml` for safe EPUB XML validation
 
-`requirements-gpu.txt` targets CUDA 12.8-enabled PyTorch wheels for GPU OCR.
+The `requirements.txt` file installs all GPU-accelerated PyTorch dependencies.
 Use a compatible NVIDIA driver, or replace the PyTorch index URL with the
 CUDA version appropriate for the target machine. `requirements-cpu.txt`
 installs OCR without CUDA-specific PyTorch wheels.
@@ -26,7 +27,7 @@ cd D:\Code\pdf_to_epub
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements-gpu.txt
+python -m pip install -r requirements.txt
 ```
 
 For a normal package installation, install the project itself:
@@ -35,13 +36,15 @@ For a normal package installation, install the project itself:
 python -m pip install .
 ```
 
-For CPU-only OCR, use:
+For CPU-only OCR (no GPU PyTorch), use:
 
 ```powershell
 python -m pip install -r requirements-cpu.txt
 ```
 
 ## Usage
+
+### Command-line Examples
 
 ```powershell
 python -m pdf_to_epub --help
@@ -69,6 +72,33 @@ python -m pdf_to_epub `
 
 Use `--ocr-device cpu` for CPU OCR. Use `--no-ocr` when the PDF already
 contains extractable text and OCR is unnecessary.
+
+### Progress Bar
+
+Enable a visual progress bar during conversion:
+
+```powershell
+python -m pdf_to_epub -i input.pdf -o output.epub --progress-bar
+```
+
+The progress bar shows real-time conversion progress with elapsed time,
+remaining pages, and throughput rate. It automatically closes when complete.
+
+### Installation Options
+
+Install the progress bar dependency explicitly:
+
+```powershell
+python -m pip install tqdm
+```
+
+Or use the optional dependency group:
+
+```powershell
+python -m pip install pdf-to-epub[progress]
+```
+
+The `--progress-bar` option is available by default when tqdm is installed.
 
 The modular API is available through `PDFToEPUBConverter` and
 `ConversionOptions`:

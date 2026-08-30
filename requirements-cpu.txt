@@ -3,6 +3,7 @@ pymupdf
 ebooklib
 Pillow
 defusedxml
+tqdm
 
 # OCR support using the CPU.
 easyocr

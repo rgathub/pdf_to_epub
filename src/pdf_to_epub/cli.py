@@ -230,6 +230,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--progress-bar",
+        action="store_true",
+        help="Enable tqdm progress bar during conversion",
+    )
+
+    parser.add_argument(
         "--preflight",
         action="store_true",
         help="Check dependencies, OCR availability, and GPU support, then exit",
@@ -377,6 +383,7 @@ Examples:
         ocr_retry_dpi=args.ocr_retry_dpi,
         ocr_retry_confidence=args.ocr_retry_confidence,
         workers=args.workers,
+        progress_bar=args.progress_bar,
     )
 
     if len(args.input) == 1:

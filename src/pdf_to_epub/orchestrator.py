@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 import html
 import importlib.util
 import json
@@ -67,6 +68,7 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
         ocr_retry_confidence: float = 0.35,
         workers: int = 1,
         progress_callback=None,
+        progress_bar: bool = False,
         options: ConversionOptions | None = None,
     ):
         """
@@ -145,12 +147,12 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
                 chapter_overrides=chapter_overrides or {},
                 image_placement=image_placement,
                 language=language,
-                ocr_retry=ocr_retry,
-                ocr_retry_dpi=ocr_retry_dpi,
-                ocr_retry_confidence=ocr_retry_confidence,
-                workers=workers,
-                progress_callback=progress_callback,
-            )
+            ocr_retry=ocr_retry,
+            ocr_retry_dpi=ocr_retry_dpi,
+            ocr_retry_confidence=ocr_retry_confidence,
+            workers=workers,
+            progress_callback=progress_callback,
+        )
         self.options = options
         if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
             raise ValueError("workers must be a positive integer")
@@ -181,6 +183,8 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
         self.ocr_retry_confidence = ocr_retry_confidence
         self.workers = workers
         self.progress_callback = progress_callback
+        self._use_tqdm = progress_bar  # Use tqdm progress bar if enabled
+        self._tqdm_bar = None
         self._ocr_reader = None
         self._ocr_gpu = False
         self._current_pdf_path = None
@@ -255,13 +259,29 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
         }
         if self.progress_callback is not None:
             self.progress_callback(event)
-        logger.info("Processing page %s/%s (%.1f%%)", page_num, total_pages, percent)
-        if page_num == 1 or page_num % 10 == 0 or page_num == total_pages:
-            print(
-                f"Processing page {page_num}/{total_pages} "
-                f"({percent:.1f}%)",
-                flush=True,
-            )
+        
+        # Initialize tqdm bar on first call for this conversion
+        if self._tqdm_bar is None and total_pages > 0 and self._use_tqdm:
+            try:
+                self._tqdm_bar = tqdm(
+                    total=total_pages,
+                    desc="Converting",
+                    unit=" page",
+                    bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+                )
+            except ImportError:
+                self._use_tqdm = False
+        
+        if self._use_tqdm and self._tqdm_bar is not None:
+            self._tqdm_bar.update(1)
+        else:
+            logger.info("Processing page %s/%s (%.1f%%)", page_num, total_pages, percent)
+            if page_num == 1 or page_num % 10 == 0 or page_num == total_pages:
+                print(
+                    f"Processing page {page_num}/{total_pages} "
+                    f"({percent:.1f}%)",
+                    flush=True,
+                )
 
 
     def _initialize_parallel_worker(self, pdf_path: str) -> None:
@@ -484,7 +504,12 @@ class PDFToEPUBConverter(EPUBContentMixin, OCRMixin, PDFPageMixin, EPUBValidatio
             self._stats["elapsed_seconds"] = round(time.perf_counter() - started, 3)
             self._write_report(pdf_path, output_path)
 
+            if self._use_tqdm and self._tqdm_bar is not None:
+                self._tqdm_bar.close()
+            
             print(f"Successfully converted: {pdf_path} -> {output_path}")
+            if self._use_tqdm and self._tqdm_bar is not None:
+                self._tqdm_bar.close()
             return True
 
         except (OSError, RuntimeError, ValueError, TypeError) as e:

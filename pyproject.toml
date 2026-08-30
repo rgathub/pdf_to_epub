@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ocr = ["easyocr"]
+progress = ["tqdm"]
 
 [project.scripts]
 pdf-to-epub = "pdf_to_epub.cli:main"
